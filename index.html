@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>여행 패키지 카톡 공유</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px;
+    font-family: -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    background: #f5f5f7; color: #1c1c1e;
+    -webkit-text-size-adjust: 100%;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #000; color: #f2f2f7; }
+    textarea { background: #1c1c1e; color: #f2f2f7; border-color: #38383a; }
+    .hint { color: #98989d; }
+    img.preview { border-color: #38383a; }
+  }
+  h1 { font-size: 18px; margin: 4px 0 12px; }
+  img.preview {
+    width: 100%; border: 1px solid #d1d1d6; border-radius: 12px;
+    margin-bottom: 12px; background: #fff;
+  }
+  textarea {
+    width: 100%; min-height: 34vh; padding: 12px;
+    font-size: 14px; line-height: 1.5; border: 1px solid #d1d1d6; border-radius: 12px;
+    background: #fff; color: #1c1c1e; resize: vertical; white-space: pre-wrap;
+  }
+  button {
+    width: 100%; padding: 16px; margin-top: 12px;
+    font-size: 17px; font-weight: 600; border: none; border-radius: 14px;
+    color: #fff; background: #fae100; color: #3c1e1e; cursor: pointer;
+  }
+  button.copy { background: #007aff; color: #fff; }
+  .hint { font-size: 13px; color: #6e6e73; margin-top: 10px; line-height: 1.5; }
+  .err { color: #ff3b30; }
+</style>
+</head>
+<body>
+  <h1>✈️ 여행 패키지 — 카톡으로 공유</h1>
+  <img id="preview" class="preview" alt="비교표 미리보기" style="display:none">
+  <textarea id="out" readonly aria-label="공유 텍스트"></textarea>
+  <button id="share">📤 카카오톡으로 공유하기</button>
+  <button id="copy" class="copy">📋 텍스트 복사</button>
+  <p class="hint" id="hint">
+    공유 버튼을 누르면 앱 선택 창이 뜹니다 → <b>카카오톡</b> 선택 → 받는 사람 선택.<br>
+    비교표 이미지와 본문이 함께 공유됩니다(기기/카톡 설정에 따라 이미지만, 또는 글만 갈 수 있어요).
+  </p>
+
+<script>
+  // ---- base64url(UTF-8) 디코드 ----
+  function b64urlDecode(s) {
+    s = s.replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    const bin = atob(s);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+
+  // ---- 마크다운 링크 [명칭](url) -> "명칭\nurl" 생링크 변환 ----
+  function toBareLinks(md) {
+    return md.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+      return label + "\n" + url;
+    });
+  }
+
+  const out = document.getElementById("out");
+  const hint = document.getElementById("hint");
+  const previewEl = document.getElementById("preview");
+  let text = "";
+  let imgUrl = "";
+
+  try {
+    const raw = location.hash.slice(1);
+    if (!raw) throw new Error("공유할 내용이 없습니다. 텔레그램의 '카톡 공유' 버튼으로 다시 열어주세요.");
+    const payload = JSON.parse(b64urlDecode(raw));
+    const md = payload.t || "";
+    imgUrl = payload.img || "";
+    text = toBareLinks(md);
+    out.value = text;
+    if (imgUrl) {
+      previewEl.src = imgUrl;
+      previewEl.style.display = "block";
+    }
+  } catch (e) {
+    out.value = "";
+    hint.innerHTML = '<span class="err">⚠️ ' + (e && e.message ? e.message : e) + "</span>";
+  }
+
+  // 이미지 URL -> File (same-origin이라 CORS 안전)
+  async function fetchImageFile() {
+    if (!imgUrl) return null;
+    try {
+      const res = await fetch(imgUrl, { cache: "no-store" });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return new File([blob], "여행패키지_비교표.png", { type: blob.type || "image/png" });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  document.getElementById("share").addEventListener("click", async () => {
+    if (!navigator.share) {
+      hint.innerHTML = '<span class="err">이 브라우저는 공유 기능을 지원하지 않습니다. \'복사\' 버튼을 쓰세요.</span>';
+      return;
+    }
+    const file = await fetchImageFile();
+    // Web Share Level 2: 이미지 첨부가 지원되면 text+files, 아니면 text만
+    const canFiles = file && navigator.canShare && navigator.canShare({ files: [file] });
+    try {
+      if (canFiles) {
+        await navigator.share({ text, files: [file] });
+      } else if (text) {
+        await navigator.share({ text });
+        if (file) hint.innerHTML = "ℹ️ 이 기기는 이미지 동시 공유를 지원하지 않아 글만 보냈습니다. 이미지는 위 미리보기를 길게 눌러 저장·전송하세요.";
+      }
+    } catch (e) {
+      if (e && e.name !== "AbortError") {
+        hint.innerHTML = '<span class="err">공유 실패: ' + e.message + ' — 아래 \'복사\'를 쓰세요.</span>';
+      }
+    }
+  });
+
+  document.getElementById("copy").addEventListener("click", async () => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      hint.innerHTML = "✅ 복사됐습니다. 카카오톡에 붙여넣기 하세요.";
+    } catch (e) {
+      out.select();
+      document.execCommand("copy");
+      hint.innerHTML = "✅ 복사됐습니다 (수동). 카카오톡에 붙여넣기 하세요.";
+    }
+  });
+</script>
+</body>
+</html>
