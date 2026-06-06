@@ -34,6 +34,8 @@
     font-size: 17px; font-weight: 600; border: none; border-radius: 14px;
     color: #fff; background: #fae100; color: #3c1e1e; cursor: pointer;
   }
+  button:disabled { opacity: .4; cursor: default; }
+  button.text { background: #fae100; color: #3c1e1e; }
   button.copy { background: #007aff; color: #fff; }
   .hint { font-size: 13px; color: #6e6e73; margin-top: 10px; line-height: 1.5; }
   .err { color: #ff3b30; }
@@ -43,11 +45,12 @@
   <h1>✈️ 여행 패키지 — 카톡으로 공유</h1>
   <img id="preview" class="preview" alt="비교표 미리보기" style="display:none">
   <textarea id="out" readonly aria-label="공유 텍스트"></textarea>
-  <button id="share">📤 카카오톡으로 공유하기</button>
-  <button id="copy" class="copy">📋 텍스트 복사</button>
+  <button id="shareImg">📷 비교표 이미지 공유</button>
+  <button id="shareText" class="text">📝 본문(링크) 공유</button>
+  <button id="copy" class="copy">📋 본문 복사</button>
   <p class="hint" id="hint">
-    공유 버튼을 누르면 앱 선택 창이 뜹니다 → <b>카카오톡</b> 선택 → 받는 사람 선택.<br>
-    비교표 이미지와 본문이 함께 공유됩니다(기기/카톡 설정에 따라 이미지만, 또는 글만 갈 수 있어요).
+    카톡은 이미지·글을 <b>한 번에</b> 못 받아요 → 버튼을 <b>따로</b> 눌러주세요.<br>
+    각 버튼 → 앱 선택 창 → <b>카카오톡</b> → 받는 사람. 이미지·본문을 각각 한 번씩 보내면 됩니다.
   </p>
 
 <script>
@@ -103,25 +106,48 @@
     }
   }
 
-  document.getElementById("share").addEventListener("click", async () => {
-    if (!navigator.share) {
-      hint.innerHTML = '<span class="err">이 브라우저는 공유 기능을 지원하지 않습니다. \'복사\' 버튼을 쓰세요.</span>';
+  const shareImgBtn = document.getElementById("shareImg");
+  const shareTextBtn = document.getElementById("shareText");
+
+  // 이미지 없으면 이미지 버튼 숨김
+  if (!imgUrl) shareImgBtn.style.display = "none";
+  // 공유 미지원 브라우저면 공유 버튼 비활성(복사만)
+  if (!navigator.share) {
+    shareImgBtn.disabled = true;
+    shareTextBtn.disabled = true;
+    hint.innerHTML = '이 브라우저는 공유를 지원하지 않습니다. <b>복사</b> 버튼을 쓰세요.';
+  }
+
+  // ① 이미지만 공유 (text 안 넣음 → 카톡이 이미지 깔끔히 수신)
+  shareImgBtn.addEventListener("click", async () => {
+    if (!navigator.share) return;
+    const file = await fetchImageFile();
+    if (!file) {
+      hint.innerHTML = '<span class="err">이미지를 불러오지 못했습니다. 위 미리보기를 길게 눌러 저장·전송하세요.</span>';
       return;
     }
-    const file = await fetchImageFile();
-    // Web Share Level 2: 이미지 첨부가 지원되면 text+files, 아니면 text만
-    const canFiles = file && navigator.canShare && navigator.canShare({ files: [file] });
+    if (navigator.canShare && !navigator.canShare({ files: [file] })) {
+      hint.innerHTML = "ℹ️ 이 기기는 이미지 공유를 지원하지 않습니다. 위 미리보기를 길게 눌러 저장·전송하세요.";
+      return;
+    }
     try {
-      if (canFiles) {
-        await navigator.share({ text, files: [file] });
-      } else if (text) {
-        await navigator.share({ text });
-        if (file) hint.innerHTML = "ℹ️ 이 기기는 이미지 동시 공유를 지원하지 않아 글만 보냈습니다. 이미지는 위 미리보기를 길게 눌러 저장·전송하세요.";
-      }
+      await navigator.share({ files: [file] });
+      hint.innerHTML = "✅ 이미지 공유함. 이제 <b>📝 본문(링크) 공유</b>도 눌러 보내세요.";
     } catch (e) {
-      if (e && e.name !== "AbortError") {
-        hint.innerHTML = '<span class="err">공유 실패: ' + e.message + ' — 아래 \'복사\'를 쓰세요.</span>';
-      }
+      if (e && e.name !== "AbortError")
+        hint.innerHTML = '<span class="err">이미지 공유 실패: ' + e.message + "</span>";
+    }
+  });
+
+  // ② 본문(링크)만 공유 (text only → 카톡이 글·링크 수신)
+  shareTextBtn.addEventListener("click", async () => {
+    if (!navigator.share || !text) return;
+    try {
+      await navigator.share({ text });
+      hint.innerHTML = "✅ 본문 공유함. 이미지도 보내려면 <b>📷 비교표 이미지 공유</b>를 누르세요.";
+    } catch (e) {
+      if (e && e.name !== "AbortError")
+        hint.innerHTML = '<span class="err">본문 공유 실패: ' + e.message + " — \'복사\'를 쓰세요.</span>";
     }
   });
 
